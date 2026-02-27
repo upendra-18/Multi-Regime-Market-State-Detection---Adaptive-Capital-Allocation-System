@@ -1,130 +1,65 @@
-# ==========================================================
-# Multi-Regime Market State Detection Dashboard
-# ==========================================================
-
 import streamlit as st
-import pandas as pd
-import numpy as np
-import pickle
+import requests
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-from datetime import datetime
+import pandas as pd
+
+API_URL = "https://multi-regime-market-state-detection.onrender.com/predict"
 
 st.set_page_config(
-    page_title="Multi-Regime Allocation System",
-    layout="wide",
+    page_title="Market Regime Allocation Dashboard",
+    layout="wide"
 )
 
-# ==========================================================
-# Utility Functions
-# ==========================================================
-
-@st.cache_data
-def load_features():
-    return pd.read_csv("data/features.csv", index_col=0, parse_dates=True)
-
-@st.cache_data
-def load_signals():
-    return pd.read_csv("data/daily_summary.csv", index_col=0, parse_dates=True)
-
-@st.cache_resource
-def load_models():
-    with open("artefacts/market_regime_models.pkl", "rb") as f:
-        obj = pickle.load(f)
-    return obj["models"]
+st.title("Multi-Regime Market State Detection & Capital Allocation")
 
 # ==========================================================
-# Allocation Logic (Single Day)
+# Fetch API Data
 # ==========================================================
 
-def allocation_engine(pred, bull_calm, bull_turb, bear_calm, bear_turb):
+def fetch_prediction():
+    try:
+        response = requests.get(API_URL, timeout=20)
+        return response.json()
+    except Exception as e:
+        st.error(f"API Error: {e}")
+        return None
 
-    bull = pred.get("Stable_Bull", 0) == 1
-    bear = pred.get("Stable_Bear", 0) == 1
-    low_vol = pred.get("Stable_Low_Vol", 0) == 1
-    high_vol = pred.get("High_Volatility", 0) == 1
+data = fetch_prediction()
 
-    regime = "Neutral"
-    position = 0.5
-
-    if high_vol and bear:
-        regime = "HighVol_Bear"
-        position = bear_turb
-    elif high_vol and bull:
-        regime = "HighVol_Bull"
-        position = bull_turb
-    elif low_vol and bear:
-        regime = "LowVol_Bear"
-        position = bear_calm
-    elif low_vol and bull:
-        regime = "LowVol_Bull"
-        position = bull_calm
-    elif bear:
-        regime = "Neutral_Bear"
-        position = bear_calm
-
-    return regime, position
+if data is None:
+    st.stop()
 
 # ==========================================================
-# Sidebar Controls
+# Extract Data
 # ==========================================================
 
-st.sidebar.title("Strategy Controls")
+raw = data.get("Raw_Model_Output", {})
+decision = data.get("Final_Decision", {})
 
-bull_calm = st.sidebar.slider("Bull Calm Exposure", 0.5, 1.5, 1.0, 0.05)
-bull_turb = st.sidebar.slider("Bull Turbulent Exposure", 0.5, 1.5, 0.9, 0.05)
-bear_calm = st.sidebar.slider("Bear Calm Exposure", 0.0, 1.0, 0.6, 0.05)
-bear_turb = st.sidebar.slider("Bear Turbulent Exposure", 0.0, 1.0, 0.2, 0.05)
-
-cost_rate = st.sidebar.slider("Transaction Cost (%)", 0.0, 0.5, 0.05) / 100
+regime = decision.get("Regime_Final", "N/A")
+exposure = decision.get("Exposure_Fraction", 0)
+exposure_pct = decision.get("Recommended_Position_%", 0)
 
 # ==========================================================
-# Load Data
+# Top Metrics
 # ==========================================================
 
-features = load_features()
-signals = load_signals()
-models = load_models()
+col1, col2, col3 = st.columns(3)
 
-X_latest = features.tail(1)
+col1.metric("Current Regime", regime)
+col2.metric("Recommended Allocation", f"{exposure_pct}%")
+col3.metric("Signals Active", sum(raw.values()))
 
-# ==========================================================
-# Predict Current Regime
-# ==========================================================
-
-predictions = {}
-for regime in models:
-    model = models[regime]
-    X_input = X_latest[model.feature_names_in_]
-    predictions[regime] = int(model.predict(X_input)[0])
-
-regime_final, exposure = allocation_engine(
-    predictions,
-    bull_calm,
-    bull_turb,
-    bear_calm,
-    bear_turb
-)
+st.markdown("---")
 
 # ==========================================================
-# Top Panel – Current Status
+# Exposure Gauge
 # ==========================================================
 
-col1, col2, col3, col4 = st.columns(4)
-
-col1.metric("Current Regime", regime_final)
-col2.metric("Recommended Allocation", f"{round(exposure*100,2)}%")
-col3.metric("Model Signals Active", sum(predictions.values()))
-col4.metric("Last Data Update", features.index[-1].date())
-
-# ==========================================================
-# Allocation Gauge
-# ==========================================================
-
-gauge = go.Figure(go.Indicator(
+fig = go.Figure(go.Indicator(
     mode="gauge+number",
-    value=exposure*100,
-    title={'text': "Portfolio Exposure %"},
+    value=exposure_pct,
+    title={'text': "Portfolio Exposure (%)"},
     gauge={
         'axis': {'range': [0, 150]},
         'bar': {'color': "darkblue"},
@@ -135,103 +70,19 @@ gauge = go.Figure(go.Indicator(
         ],
     }
 ))
-st.plotly_chart(gauge, use_container_width=True)
 
-# ==========================================================
-# Backtest Engine
-# ==========================================================
-
-def backtest(df, exposure_series, cost_rate):
-
-    r = df["Close"].pct_change().fillna(0)
-
-    pos = exposure_series.shift(1).fillna(0.5)
-    gross = pos * r
-    turnover = pos.diff().abs().fillna(0)
-    cost = -turnover * cost_rate
-    net = gross + cost
-
-    equity = (1 + net).cumprod()
-    bh_equity = (1 + r).cumprod()
-
-    return equity, bh_equity, net
-
-# Dummy exposure (historical neutral for demonstration)
-exposure_series = pd.Series(0.8, index=features.index)
-
-equity, bh_equity, net = backtest(signals, exposure_series, cost_rate)
-
-# ==========================================================
-# Equity & Drawdown
-# ==========================================================
-
-fig = make_subplots(rows=2, cols=1, shared_xaxes=True)
-
-fig.add_trace(go.Scatter(x=equity.index, y=equity, name="Strategy"), row=1, col=1)
-fig.add_trace(go.Scatter(x=bh_equity.index, y=bh_equity, name="Buy & Hold", line=dict(dash="dash")), row=1, col=1)
-
-dd = equity / equity.cummax() - 1
-bh_dd = bh_equity / bh_equity.cummax() - 1
-
-fig.add_trace(go.Scatter(x=dd.index, y=dd, name="Strategy DD"), row=2, col=1)
-fig.add_trace(go.Scatter(x=bh_dd.index, y=bh_dd, name="BH DD", line=dict(dash="dash")), row=2, col=1)
-
-fig.update_layout(height=700, title="Strategy vs Buy & Hold")
 st.plotly_chart(fig, use_container_width=True)
 
 # ==========================================================
-# Performance Metrics
+# Raw Model Output
 # ==========================================================
 
-ann_factor = np.sqrt(252)
-
-sharpe = net.mean() / net.std() * ann_factor if net.std() != 0 else np.nan
-cagr = equity.iloc[-1] ** (252/len(equity)) - 1
-max_dd = dd.min()
-
-m1, m2, m3 = st.columns(3)
-m1.metric("CAGR %", round(cagr*100,2))
-m2.metric("Sharpe Ratio", round(sharpe,2))
-m3.metric("Max Drawdown %", round(max_dd*100,2))
+st.subheader("Raw Regime Signals")
+st.json(raw)
 
 # ==========================================================
-# Feature Importance
-# ==========================================================
-
-st.subheader("Feature Importance")
-
-try:
-    model = list(models.values())[0]
-    if hasattr(model, "feature_importances_"):
-        importance = pd.Series(
-            model.feature_importances_,
-            index=model.feature_names_in_
-        ).sort_values(ascending=False).head(10)
-
-        fig_imp = go.Figure(go.Bar(
-            x=importance.values,
-            y=importance.index,
-            orientation="h"
-        ))
-        fig_imp.update_layout(height=400)
-        st.plotly_chart(fig_imp, use_container_width=True)
-except:
-    st.write("Feature importance not available for this model.")
-
-# ==========================================================
-# Regime Distribution
-# ==========================================================
-
-st.subheader("Regime Signal Distribution")
-
-regime_counts = pd.Series(predictions).value_counts()
-st.bar_chart(regime_counts)
-
-# ==========================================================
-# Footer
+# System Info
 # ==========================================================
 
 st.markdown("---")
-st.markdown(
-    "Multi-Regime Market State Detection & Risk-Adjusted Capital Allocation System"
-)
+st.caption("Backend powered by FastAPI | Hosted on Render | Updated via scheduled cron job")
