@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import os
 
+# Time log for knowing the execution time set=up by cron job
+print("PIPELINE RUN AT:", datetime.now())
 
 # -----------------------------------
 # Fetch historical data (4 months safe window)
