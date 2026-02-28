@@ -51,7 +51,11 @@ def four_regime_allocation_from_prediction(
 
 app = Flask(__name__)
 
-with open("./artefacts/market_regime_models.pkl", "rb") as f:
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+model_path = os.path.join(BASE_DIR, "artefacts", "market_regime_models.pkl")
+
+with open(model_path, "rb") as f:
     saved_obj = pickle.load(f)
 
 models = saved_obj["models"]
@@ -63,7 +67,8 @@ def ping():
 @app.route("/predict", methods=['GET'])
 def predict():
 
-    features = pd.read_csv("data/features.csv", index_col=0, parse_dates=True)
+    features_path = os.path.join(BASE_DIR, "data", "features.csv")
+    features = pd.read_csv(features_path, index_col=0, parse_dates=True)
 
     if features.empty:
         return {"error": "Not enough data to compute features"}
