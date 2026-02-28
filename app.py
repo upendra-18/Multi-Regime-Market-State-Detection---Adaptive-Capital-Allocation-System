@@ -1,6 +1,7 @@
 from flask import Flask
 import pickle
 import pandas as pd
+import os
 
 def four_regime_allocation_from_prediction(
     pred: dict,
@@ -85,4 +86,5 @@ def predict():
     }
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 8000))
+    app.run(host="0.0.0.0", port=port)
