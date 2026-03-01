@@ -1,7 +1,11 @@
-from flask import Flask
+from flask import Flask, request, jsonify
 import pickle
 import pandas as pd
+import numpy as np
 import os
+from datetime import datetime
+
+
 
 def four_regime_allocation_from_prediction(
     pred: dict,
@@ -89,6 +93,95 @@ def predict():
         "Raw_Model_Output": predictions,
         "Final_Decision": allocation
     }
+
+
+@app.route("/history", methods=["GET"])
+def history():
+
+    df = pd.read_csv("data/daily_summary.csv", parse_dates=["Date"])
+    df = df.sort_values("Date")
+
+    # reconstruct regime
+    df["Regime"] = np.where(
+        df["Stocks_Above_MA20"] > df["Stocks_Below_MA20"],
+        "Bull",
+        "Bear"
+    )
+
+    return {
+        "dates": df["Date"].dt.strftime("%Y-%m-%d").tolist(),
+        "regimes": df["Regime"].tolist()
+    }
+
+
+@app.route("/backtest", methods=["GET"])
+def backtest():
+
+    bull_calm = float(request.args.get("bull_calm", 1.0))
+    bull_turb = float(request.args.get("bull_turb", 0.9))
+    bear_calm = float(request.args.get("bear_calm", 0.6))
+    bear_turb = float(request.args.get("bear_turb", 0.2))
+    cost = float(request.args.get("cost", 0.0005))
+
+    prices = pd.read_csv("data/index_price.csv", parse_dates=["Date"])
+    prices = prices.sort_values("Date")
+
+    returns = prices["Close"].pct_change().fillna(0)
+
+    # Simple example allocation (replace with real regime mapping)
+    position = np.where(returns > 0, bull_calm, bear_calm)
+
+    strategy = (1 + position * returns).cumprod()
+    bh = (1 + returns).cumprod()
+
+    dd = strategy / strategy.cummax() - 1
+
+    return {
+        "dates": prices["Date"].dt.strftime("%Y-%m-%d").tolist(),
+        "strategy": strategy.tolist(),
+        "buy_hold": bh.tolist(),
+        "drawdown": dd.tolist()
+    }
+
+@app.route("/metrics", methods=["GET"])
+def metrics():
+
+    prices = pd.read_csv("data/index_price.csv")
+    returns = prices["Close"].pct_change().fillna(0)
+
+    strategy_returns = 0.8 * returns
+    ann = np.sqrt(252)
+
+    sharpe = strategy_returns.mean()/strategy_returns.std()*ann
+    cagr = (1+strategy_returns).prod()**(252/len(strategy_returns)) - 1
+    vol = strategy_returns.std()*ann
+    max_dd = ((1+strategy_returns).cumprod()/
+              (1+strategy_returns).cumprod().cummax()-1).min()
+
+    return {
+        "cagr": round(cagr*100,2),
+        "sharpe": round(sharpe,2),
+        "volatility": round(vol*100,2),
+        "max_drawdown": round(max_dd*100,2)
+    }
+
+
+@app.route("/importance", methods=["GET"])
+def importance():
+
+    model = models["Stable_Bull"]  # example
+    imp = dict(zip(model.feature_names_in_,
+                   model.feature_importances_))
+
+    return imp
+
+@app.route("/health", methods=["GET"])
+def health():
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
