@@ -80,17 +80,37 @@ def predict():
     X_latest = features.tail(1)
 
     predictions = {}
+    probabilities = {}
 
     for regime in models:
         model = models[regime]
         X_input = X_latest[model.feature_names_in_]
-        predictions[regime] = int(model.predict(X_input)[0])
+
+        # ---- Hard prediction (keep for allocation logic) ----
+        pred_label = int(model.predict(X_input)[0])
+        predictions[regime] = pred_label
+
+        # ---- Probability extraction (for confidence display) ----
+        if hasattr(model, "predict_proba"):
+            proba = model.predict_proba(X_input)[0]
+
+            # Get probability of class "1"
+            if 1 in model.classes_:
+                class_index = list(model.classes_).index(1)
+                prob_1 = float(proba[class_index])
+            else:
+                prob_1 = float(np.max(proba))
+
+            probabilities[regime] = round(prob_1, 4)
+        else:
+            # Fallback (should not happen with RandomForest)
+            probabilities[regime] = float(pred_label)
 
     # Convert regime prediction → capital allocation
     allocation = four_regime_allocation_from_prediction(predictions)
 
     return {
-        "Raw_Model_Output": predictions,
+        "Raw_Model_Output": probabilities,   # ← now real probabilities
         "Final_Decision": allocation
     }
 
