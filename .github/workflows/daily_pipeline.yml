@@ -5,18 +5,22 @@ on:
     - cron: '30 0 * * *'   # 6:00 AM IST
   workflow_dispatch:
 
+# GRANTING PERMISSION TO WRITE
+permissions:
+  contents: write
+
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4   # also upgrade version
         with:
-          persist-credentials: true   # REQUIRED for push
+          persist-credentials: true
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5   # upgraded
         with:
           python-version: '3.11'
 
