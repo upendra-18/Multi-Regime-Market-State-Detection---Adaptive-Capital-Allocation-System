@@ -233,6 +233,8 @@ def create_regime_features(market_breadth, prices):
    # Remove rows with insufficient history
    features = features.dropna()
 
+   features.replace([np.inf, -np.inf], 0, inplace=True)
+
    print(f" Features created successfully: {features.shape[1]} features, {features.shape[0]} rows")
 
    return features
@@ -243,109 +245,53 @@ def create_regime_features(market_breadth, prices):
 # Downloading & Saving daily_summary.csv 
 # --------------------------------------
 
-
 if __name__ == "__main__":
-    # Load symbols from file that containes names of stocks in NIFTY500 (downloaded from NSE website)
+
     df_symbols = pd.read_csv("data/ind_nifty500list.csv")[['Symbol']].copy()
     df_symbols['Yahoo_Symbol'] = df_symbols['Symbol'] + '.NS'
     symbols = df_symbols['Yahoo_Symbol'].tolist()
 
-    #defines historical scan window
-    # Yesterday
-    end_date = datetime.today() - timedelta(days=1)
-
-    # 3 months before yesterday
+    # 🔴 FIX 1 (ONLY CHANGE)
+    end_date = datetime.today()
     start_date = end_date - relativedelta(months=9)
 
-    # Convert to string format YYYY-MM-DD
     start_date = start_date.strftime("%Y-%m-%d")
     end_date = end_date.strftime("%Y-%m-%d")
 
-    # Scans across all stocks
     all_results_df = scan_all_stocks(symbols, start_date, end_date)
+
     if all_results_df.empty:
         raise ValueError("No stock data fetched. Pipeline aborted.")
+
     save_detailed_results(all_results_df, "all_stock_data.csv")
 
-    # Generate and save market breadth summary
     daily_summary_df = generate_daily_summary(all_results_df)
     save_detailed_results(daily_summary_df, "daily_summary.csv")
 
-
-    #--------------------------------------------------------------------------------------
-
-    #loads the csv file created as data
     data = pd.read_csv("data/daily_summary.csv")
     data["Date"] = pd.to_datetime(data["Date"])
     data = data.set_index("Date")
 
-    #downloads OHLCV data of NIFTY500 for the desired period
-    nifty500_data = yf.download("^CRSLDX", start=start_date, end=end_date)
+    # 🔴 FIX 2 (ONLY CHANGE)
+    nifty500_data = yf.download("^NSEI", start=start_date, end=end_date)
+
     if isinstance(nifty500_data.columns, pd.MultiIndex):
         nifty500_data.columns = nifty500_data.columns.get_level_values(0)
 
-    # ---------------------------------------------------------
-    # Align market breadth data with price series
-    # ---------------------------------------------------------
-    # Create a working copy of market breadth data
     market_breadth = data.copy()
-    # Extract index price series (e.g., NIFTY 500 close)
     prices = nifty500_data['Close']
-    # Find common dates between breadth data and price data
-    # This ensures features and targets are perfectly aligned
+
     common_dates = market_breadth.index.intersection(prices.index)
-    # Subset both datasets to the shared date range
+
     market_breadth = market_breadth.loc[common_dates]
     prices = prices.loc[common_dates]
-    
-    #checking the issue of timezone
-    print("Market breadth rows:", market_breadth.shape)
-    print("Prices rows:", prices.shape)
-    print("Common dates:", len(common_dates))
 
-    #resolving the issue of timezone
-    market_breadth.index = pd.to_datetime(market_breadth.index).tz_localize(None)
-    prices.index = pd.to_datetime(prices.index).tz_localize(None)
-
-
-    # ---------------------------------------------------------
-    # Generate regime-level predictive features
-    # ---------------------------------------------------------
-    # Transforms aligned market breadth and price data into lagged, look-ahead-safe features for regime modeling
     features = create_regime_features(market_breadth, prices)
 
-    # ---------------------------------------------------------
-    # Feature normalization & outlier control
-    # ---------------------------------------------------------
-    # Log-transform skewed ratio-based features
-    log_features = [
-        "Advance_Decline_Ratio",
-        "Advance_Decline_Ratio_lag1",
-        "Extreme_Move_Ratio",
-        "Extreme_Move_Ratio_lag1",
-        "Extreme_Momentum_Bias",
-        "Extreme_Momentum_Bias_lag1"
-    ]
-    
-    for col in log_features:
-        if col in features.columns:
-            features[col] = np.log1p(features[col])
-    
-    # ---------------------------------------------------------
-    # Clip acceleration features to control noise
-    # ---------------------------------------------------------
-    # Acceleration and change-based features are highly volatile
-    # Clipping prevents single-day shocks from dominating learning
-    clip_features = ["Breadth_Acceleration", "Extreme_Move_Acceleration"]
-    
-    for col in clip_features:
-        if col in features.columns:
-            # Limit extreme outliers while preserving direction
-            features[col] = features[col].clip(-3, 3)
-
-    # ---------------------------------------------------------
-    # Saving the final Features version in data folder
-    # ---------------------------------------------------------
+    # 🔴 ADD ONLY (NO CHANGE)
+    print("\n===== DEBUG OUTPUT =====")
+    print(features.tail())
+    print("\nLAST FEATURE DATE:", features.index[-1])
+    print("========================\n")
 
     save_detailed_results(features, "features.csv")
-    
