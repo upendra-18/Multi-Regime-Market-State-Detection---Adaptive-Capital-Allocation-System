@@ -101,6 +101,7 @@ def predict():
     allocation = four_regime_allocation_from_prediction(predictions)
 
     return {
+        "last_feature_date": str(features.index[-1]),
         "Raw_Model_Output": probabilities,
         "Final_Decision": allocation
     }
