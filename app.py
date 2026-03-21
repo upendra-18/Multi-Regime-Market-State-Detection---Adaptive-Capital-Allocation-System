@@ -5,7 +5,7 @@ import numpy as np
 import os
 from datetime import datetime
 
-
+print("PORT:", os.environ.get("PORT"))
 
 def four_regime_allocation_from_prediction(
     pred: dict,
